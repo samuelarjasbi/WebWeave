@@ -1,0 +1,294 @@
+<!-- templates/network.html -->
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Social Network Visualization</title>
+    <link href="/static/css/vis.min.css" rel="stylesheet">
+    <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" rel="stylesheet">
+    <style>
+        #network-container {
+            width: 100%;
+            height: 95vh;
+            border: 1px solid #ddd;
+            background: #f8f9fa;
+        }
+        
+        .controls {
+            padding: 10px;
+            background: #fff;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+        }
+        
+        .search-box {
+            width: 300px;
+            padding: 8px;
+            margin: 5px;
+            border: 1px solid #ddd;
+            border-radius: 4px;
+        }
+        
+        .legend {
+            position: absolute;
+            right: 20px;
+            top: 20px;
+            background: rgba(255,255,255,0.9);
+            padding: 15px;
+            border-radius: 8px;
+            box-shadow: 0 2px 6px rgba(0,0,0,0.1);
+        }
+    </style>
+</head>
+<body>
+    <div class="controls">
+        <input type="text" id="search" class="search-box" placeholder="Search users...">
+        <button onclick="resetFilters()" class="btn"><i class="fas fa-sync-alt"></i> Reset</button>
+        <button onclick="togglePhysics()" class="btn"><i class="fas fa-cogs"></i> Physics</button>
+        <span id="node-count" class="badge">Nodes: 0</span>
+        <span id="edge-count" class="badge">Edges: 0</span>
+    </div>
+    <div class="legend">
+        <div><span style="color:#00b4d8">■</span> Mutual Follow</div>
+        <div><span style="color:#ff6d00">■</span> One-way Follow</div>
+        <div><span style="color:#6fa8dc">■</span> User Node</div>
+    </div>
+
+    <!-- After the legend div -->
+    <div class="physics-panel">
+        <h4>Physics Settings</h4>
+        <label>Gravity: <input type="range" id="gravity" min="-5000" max="0" value="-2000"></label>
+        <label>Spring Length: <input type="range" id="springLength" min="50" max="500" value="220"></label>
+        <button onclick="applyPhysics()" class="btn"><i class="fas fa-rocket"></i> Apply</button>
+    </div>
+    <div id="network-container"></div>
+
+    <script src="/static/js/vis.min.js"></script>
+    <script>
+        let network = null;
+        let allNodes = [];
+        let allEdges = [];
+        
+        // Initialize network
+        function createNetwork() {
+            const container = document.getElementById('network-container');
+            
+            fetch('/api/graph')
+                .then(response => response.json())
+                .then(data => {
+                    allNodes = data.nodes;
+                    allEdges = data.edges;
+                    
+                    updateCounts();
+                    
+                    const options = {
+                        nodes: {
+                            shape: 'dot',
+                            scaling: {
+                                min: 20,
+                                max: 50,
+                                label: {
+                                    enabled: true,
+                                    min: 14,
+                                    max: 20,
+                                    drawThreshold: 10
+                                }
+                            },
+                            font: {
+                                size: 16,
+                                face: 'Roboto',
+                                color: 'rgb(0, 0, 0)'
+                            },
+                            borderWidth: 2,
+                            shadow: {
+                                enabled: true,
+                                color: 'rgba(0,0,0,0.3)',
+                                size: 10
+                            }
+                        },
+                        edges: {
+                            smooth: {
+                                type: 'dynamic',
+                                roundness: 0.5
+                            },
+                            arrows: {
+                                to: {
+                                    enabled: true,
+                                    scaleFactor: 0.8,
+                                    type: 'arrow'
+                                }
+                            },
+                            color: {
+                                inherit: false  // Crucial for custom edge colors
+                            },
+                            hoverWidth: 3
+                        },
+                        physics: {
+                            stabilization: {
+                                iterations: 1000,
+                                updateInterval: 100
+                            },
+                            barnesHut: {
+                                gravitationalConstant: -2000,
+                                springLength: 220,
+                                springConstant: 0.02,
+                                damping: 0.3
+                            }
+                        },
+                        interaction: {
+                            hover: true,
+                            tooltipDelay: 100,
+                            keyboard: {
+                                enabled: true,
+                                speed: {x: 10, y: 10, zoom: 0.02}
+                            }
+                        }
+                    };
+
+                    network = new vis.Network(
+                        container,
+                        { nodes: new vis.DataSet(allNodes), edges: new vis.DataSet(allEdges) },
+                        options
+                    );
+
+                    // Add event listeners
+                    network.on('click', handleNodeClick);
+                    network.on('hoverNode', handleNodeHover);
+                    network.on('blurNode', handleNodeBlur);
+                    
+                    // Add search functionality
+                    document.getElementById('search').addEventListener('input', handleSearch);
+                });
+        }
+        // After the network initialization
+        function applyPhysics() {
+            const gravity = parseInt(document.getElementById('gravity').value);
+            const springLength = parseInt(document.getElementById('springLength').value);
+
+            network.setOptions({
+                physics: {
+                    barnesHut: {
+                        gravitationalConstant: gravity,
+                        springLength: springLength
+                    }
+                }
+            });
+            network.fit({ animation: true });
+        }
+        
+        // After network initialization
+        document.addEventListener('keydown', (event) => {
+            if (event.key === '+') {
+                network.moveTo({
+                    scale: network.getScale() * 1.2,
+                    animation: true
+                });
+            }
+            if (event.key === '-') {
+                network.moveTo({
+                    scale: network.getScale() * 0.8,
+                    animation: true
+                });
+            }
+        });
+        // Search filter handler
+        function handleSearch(event) {
+            const query = event.target.value.toLowerCase();
+            const filteredNodes = allNodes.map(node => {
+                const match = node.label.toLowerCase().includes(query);
+                return {
+                    ...node,
+                    hidden: !match,
+                    color: match ? {
+                        background: '#4a86e8',
+                        border: '#2d5aa7'
+                    } : node.color
+                };
+            });
+
+            network.body.data.nodes.update(filteredNodes);
+            network.fit({ animation: { duration: 1000, easingFunction: 'easeInOutQuad' } });
+        }
+
+        // Node click handler with animation
+        function handleNodeClick(params) {
+            if (params.nodes.length) {
+                const nodeId = params.nodes[0];
+                const nodePosition = network.getPositions([nodeId]);
+                
+                // Pulse animation
+                network.selectNodes([nodeId]);
+                network.focus(nodeId, {
+                    scale: 0.8,
+                    animation: {
+                        duration: 1000,
+                        easingFunction: 'easeInOutQuad'
+                    }
+                });
+                
+                // Show neighbor connections
+                const connectedEdges = network.getConnectedEdges(nodeId);
+                network.clusterOutliers({
+                    joinCondition: function(childOptions) {
+                        return childOptions.id === nodeId;
+                    }
+                });
+            }
+        }
+
+        // Hover effects
+        function handleNodeHover(params) {
+            network.canvas.body.container.style.cursor = 'pointer';
+            const nodeId = params.node;
+            const scale = 1.2;
+            
+            network.updateClusteredNode(nodeId, {
+                scaling: { 
+                    min: scale,
+                    max: scale 
+                },
+                transition: {
+                    duration: 300,
+                    easingFunction: 'easeInOutQuad'
+                }
+            });
+        }
+
+        function handleNodeBlur(params) {
+            network.canvas.body.container.style.cursor = 'default';
+            const nodeId = params.node;
+            
+            network.updateClusteredNode(nodeId, {
+                scaling: { 
+                    min: 1,
+                    max: 1 
+                },
+                transition: {
+                    duration: 300,
+                    easingFunction: 'easeInOutQuad'
+                }
+            });
+        }
+
+        // Update counters
+        function updateCounts() {
+            document.getElementById('node-count').textContent = `Nodes: ${allNodes.length}`;
+            document.getElementById('edge-count').textContent = `Edges: ${allEdges.length}`;
+        }
+
+        // Toggle physics simulation
+        function togglePhysics() {
+            const physicsEnabled = network.getOptions().physics.enabled;
+            network.setOptions({ physics: { enabled: !physicsEnabled } });
+        }
+
+        // Reset view
+        function resetFilters() {
+            document.getElementById('search').value = '';
+            network.setData({ nodes: allNodes, edges: allEdges });
+            network.fit({ animation: true });
+        }
+
+        // Initialize on load
+        document.addEventListener('DOMContentLoaded', createNetwork);
+    </script>
+</body>
+</html>
