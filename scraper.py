@@ -25,4 +25,5 @@ class JSInjector:
         :param args: Any additional arguments to pass to the JS script.
         :return: The result of the async script execution.
         """
+        self.driver.set_script_timeout(600)
         return self.driver.execute_async_script(script, *args)
